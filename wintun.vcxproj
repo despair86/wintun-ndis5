@@ -176,4 +176,22 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <!-- TODO: Remove appending SHA-1 signature once Windows 7 support is discontinued. -->
+  <PropertyGroup>
+    <BuildDependsOn>$(BuildDependsOn);AppendWin7TestSignatureToCat;AppendWin7ProductionSignatureToCat</BuildDependsOn>
+    <CleanDependsOn>CleanAppendWin7SignatureToCat;$(CleanDependsOn)</CleanDependsOn>
+  </PropertyGroup>
+  <Target Name="AppendWin7TestSignatureToCat" AfterTargets="PackageTestSign" Condition="'$(SignMode)' == 'TestSign'"
+    Inputs="$(OutDir)$(ProjectName)\$(ProjectName).cat" Outputs="$(IntDir)$(TargetName).cat.sign">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(TestCertificate)&quot; /fd sha1 &quot;$(OutDir)$(ProjectName)\$(ProjectName).cat&quot;" />
+    <Touch Files="$(IntDir)$(TargetName).cat.sign" AlwaysCreate="true" />
+  </Target>
+  <Target Name="AppendWin7ProductionSignatureToCat" AfterTargets="PackageProductionSign" Condition="'$(SignMode)' == 'ProductionSign'"
+    Inputs="$(OutDir)$(ProjectName)\$(ProjectName).cat" Outputs="$(IntDir)$(TargetName).cat.sign">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(ProductionCertificate)&quot; /fd sha1 /tr &quot;$(TimeStampServer)&quot; /td sha1 &quot;$(OutDir)$(ProjectName)\$(ProjectName).cat&quot;" />
+    <Touch Files="$(IntDir)$(TargetName).cat.sign" AlwaysCreate="true" />
+  </Target>
+  <Target Name="CleanAppendWin7SignatureToCat">
+    <Delete Files="$(IntDir)$(TargetName).cat.sign" />
+  </Target>
 </Project>
