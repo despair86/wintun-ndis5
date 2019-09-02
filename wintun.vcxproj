@@ -178,9 +178,19 @@
   <ImportGroup Label="ExtensionTargets" />
   <!-- TODO: Remove appending SHA-1 signature once Windows 7 support is discontinued. -->
   <PropertyGroup>
-    <BuildDependsOn>$(BuildDependsOn);AppendWin7TestSignatureToCat;AppendWin7ProductionSignatureToCat</BuildDependsOn>
-    <CleanDependsOn>CleanAppendWin7SignatureToCat;$(CleanDependsOn)</CleanDependsOn>
+    <BuildDependsOn>$(BuildDependsOn);AppendWin7TestSignatureToSys;AppendWin7ProductionSignatureToSys;AppendWin7TestSignatureToCat;AppendWin7ProductionSignatureToCat</BuildDependsOn>
+    <CleanDependsOn>CleanAppendWin7Signature;$(CleanDependsOn)</CleanDependsOn>
   </PropertyGroup>
+  <Target Name="AppendWin7TestSignatureToSys" AfterTargets="DriverTestSign" BeforeTargets="DriverPackageTarget" Condition="'$(SignMode)' == 'TestSign'"
+    Inputs="$(TargetPath)" Outputs="$(IntDir)$(TargetName).sys.sign">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(TestCertificate)&quot; /fd sha1 &quot;$(TargetPath)&quot;" />
+    <Touch Files="$(IntDir)$(TargetName).sys.sign" AlwaysCreate="true" />
+  </Target>
+  <Target Name="AppendWin7ProductionSignatureToSys" AfterTargets="DriverProductionSign" BeforeTargets="DriverPackageTarget" Condition="'$(SignMode)' == 'ProductionSign'"
+    Inputs="$(TargetPath)" Outputs="$(IntDir)$(TargetName).sys.sign">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(ProductionCertificate)&quot; /fd sha1 /tr &quot;$(TimeStampServer)&quot; /td sha1 &quot;$(TargetPath)&quot;" />
+    <Touch Files="$(IntDir)$(TargetName).sys.sign" AlwaysCreate="true" />
+  </Target>
   <Target Name="AppendWin7TestSignatureToCat" AfterTargets="PackageTestSign" Condition="'$(SignMode)' == 'TestSign'"
     Inputs="$(OutDir)$(ProjectName)\$(ProjectName).cat" Outputs="$(IntDir)$(TargetName).cat.sign">
     <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(TestCertificate)&quot; /fd sha1 &quot;$(OutDir)$(ProjectName)\$(ProjectName).cat&quot;" />
@@ -191,7 +201,8 @@
     <Exec Command="&quot;$(SignToolPath)&quot; sign /as /sha1 &quot;$(ProductionCertificate)&quot; /fd sha1 /tr &quot;$(TimeStampServer)&quot; /td sha1 &quot;$(OutDir)$(ProjectName)\$(ProjectName).cat&quot;" />
     <Touch Files="$(IntDir)$(TargetName).cat.sign" AlwaysCreate="true" />
   </Target>
-  <Target Name="CleanAppendWin7SignatureToCat">
+  <Target Name="CleanAppendWin7Signature">
+    <Delete Files="$(IntDir)$(TargetName).sys.sign" />
     <Delete Files="$(IntDir)$(TargetName).cat.sign" />
   </Target>
 </Project>
