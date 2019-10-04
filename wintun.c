@@ -160,7 +160,7 @@ typedef struct _TUN_CTX
 
 static UINT NdisVersion;
 static NDIS_HANDLE NdisMiniportDriverHandle;
-static DRIVER_DISPATCH *NdisDispatchDeviceControl, *NdisDispatchClose;
+static DRIVER_DISPATCH *NdisDispatchDeviceControl, *NdisDispatchCleanup;
 static ERESOURCE TunDispatchCtxGuard;
 static SECURITY_DESCRIPTOR *TunDispatchSecurityDescriptor;
 
@@ -843,11 +843,11 @@ cleanup:
     return Status;
 }
 
-_Dispatch_type_(IRP_MJ_CLOSE)
-static DRIVER_DISPATCH_PAGED TunDispatchClose;
+_Dispatch_type_(IRP_MJ_CLEANUP)
+static DRIVER_DISPATCH_PAGED TunDispatchCleanup;
 _Use_decl_annotations_
 static NTSTATUS
-TunDispatchClose(DEVICE_OBJECT *DeviceObject, IRP *Irp)
+TunDispatchCleanup(DEVICE_OBJECT *DeviceObject, IRP *Irp)
 {
     KeEnterCriticalRegion();
     ExAcquireResourceSharedLite(&TunDispatchCtxGuard, TRUE);
@@ -857,7 +857,7 @@ TunDispatchClose(DEVICE_OBJECT *DeviceObject, IRP *Irp)
         TunUnregisterBuffers(Ctx, IoGetCurrentIrpStackLocation(Irp)->FileObject);
     ExReleaseResourceLite(&TunDispatchCtxGuard);
     KeLeaveCriticalRegion();
-    return NdisDispatchClose(DeviceObject, Irp);
+    return NdisDispatchCleanup(DeviceObject, Irp);
 }
 
 static MINIPORT_RESTART TunRestart;
@@ -1386,9 +1386,9 @@ DriverEntry(DRIVER_OBJECT *DriverObject, UNICODE_STRING *RegistryPath)
     }
 
     NdisDispatchDeviceControl = DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
-    NdisDispatchClose = DriverObject->MajorFunction[IRP_MJ_CLOSE];
+    NdisDispatchCleanup = DriverObject->MajorFunction[IRP_MJ_CLEANUP];
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TunDispatchDeviceControl;
-    DriverObject->MajorFunction[IRP_MJ_CLOSE] = TunDispatchClose;
+    DriverObject->MajorFunction[IRP_MJ_CLEANUP] = TunDispatchCleanup;
 
     return STATUS_SUCCESS;
 }
