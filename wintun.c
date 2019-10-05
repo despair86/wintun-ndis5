@@ -160,7 +160,7 @@ typedef struct _TUN_CTX
 
 static UINT NdisVersion;
 static NDIS_HANDLE NdisMiniportDriverHandle;
-static DRIVER_DISPATCH *NdisDispatchDeviceControl, *NdisDispatchCleanup;
+static DRIVER_DISPATCH *NdisDispatchDeviceControl;
 static ERESOURCE TunDispatchCtxGuard;
 static SECURITY_DESCRIPTOR *TunDispatchSecurityDescriptor;
 
@@ -788,6 +788,27 @@ static NTSTATUS TunInitializeDispatchSecurityDescriptor(VOID)
     return STATUS_SUCCESS;
 }
 
+static DRIVER_CANCEL TunDispatchCancel;
+_Use_decl_annotations_
+static void
+TunDispatchCancel(DEVICE_OBJECT *DeviceObject, IRP *Irp)
+{
+    IoReleaseCancelSpinLock(KeGetCurrentIrql());
+
+    KeEnterCriticalRegion();
+    ExAcquireResourceSharedLite(&TunDispatchCtxGuard, TRUE);
+#pragma warning(suppress : 28175)
+    TUN_CTX *Ctx = DeviceObject->Reserved;
+    if (Ctx)
+        TunUnregisterBuffers(Ctx, IoGetCurrentIrpStackLocation(Irp)->FileObject);
+    ExReleaseResourceLite(&TunDispatchCtxGuard);
+    KeLeaveCriticalRegion();
+
+    Irp->IoStatus.Status = STATUS_CANCELLED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+}
+
 _Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
 static DRIVER_DISPATCH_PAGED TunDispatchDeviceControl;
 _Use_decl_annotations_
@@ -829,35 +850,30 @@ TunDispatchDeviceControl(DEVICE_OBJECT *DeviceObject, IRP *Irp)
             Status = TunRegisterBuffers(Ctx, Irp);
         ExReleaseResourceLite(&TunDispatchCtxGuard);
         KeLeaveCriticalRegion();
-        break;
+        if (NT_SUCCESS(Status))
+        {
+            IoSetCancelRoutine(Irp, TunDispatchCancel);
+            IoMarkIrpPending(Irp);
+            return STATUS_PENDING;
+        }
+        Irp->IoStatus.Status = Status;
+        Irp->IoStatus.Information = 0;
+        IoCompleteRequest(Irp, IO_NO_INCREMENT);
+        return Status;
     }
     case TUN_IOCTL_FORCE_CLOSE_HANDLES:
         TunForceHandlesClosed(Stack->FileObject->DeviceObject);
         Status = STATUS_SUCCESS;
-        break;
+
+        Irp->IoStatus.Status = STATUS_SUCCESS;
+        Irp->IoStatus.Information = 0;
+        IoCompleteRequest(Irp, IO_NO_INCREMENT);
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_UNEXPECTED_IO_ERROR;
     }
 cleanup:
-    Irp->IoStatus.Status = Status;
-    Irp->IoStatus.Information = 0;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
     return Status;
-}
-
-_Dispatch_type_(IRP_MJ_CLEANUP)
-static DRIVER_DISPATCH_PAGED TunDispatchCleanup;
-_Use_decl_annotations_
-static NTSTATUS
-TunDispatchCleanup(DEVICE_OBJECT *DeviceObject, IRP *Irp)
-{
-    KeEnterCriticalRegion();
-    ExAcquireResourceSharedLite(&TunDispatchCtxGuard, TRUE);
-#pragma warning(suppress : 28175)
-    TUN_CTX *Ctx = DeviceObject->Reserved;
-    if (Ctx)
-        TunUnregisterBuffers(Ctx, IoGetCurrentIrpStackLocation(Irp)->FileObject);
-    ExReleaseResourceLite(&TunDispatchCtxGuard);
-    KeLeaveCriticalRegion();
-    return NdisDispatchCleanup(DeviceObject, Irp);
 }
 
 static MINIPORT_RESTART TunRestart;
@@ -1386,9 +1402,7 @@ DriverEntry(DRIVER_OBJECT *DriverObject, UNICODE_STRING *RegistryPath)
     }
 
     NdisDispatchDeviceControl = DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
-    NdisDispatchCleanup = DriverObject->MajorFunction[IRP_MJ_CLEANUP];
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = TunDispatchDeviceControl;
-    DriverObject->MajorFunction[IRP_MJ_CLEANUP] = TunDispatchCleanup;
 
     return STATUS_SUCCESS;
 }
