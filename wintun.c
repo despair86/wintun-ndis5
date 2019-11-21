@@ -596,13 +596,13 @@ TunRegisterBuffers(_Inout_ TUN_CTX *Ctx, _Inout_ IRP *Irp)
 
     Ctx->Device.Send.RingTail = InterlockedGetU(&Ctx->Device.Send.Ring->Tail);
     if (Status = STATUS_INVALID_PARAMETER, Ctx->Device.Send.RingTail >= Ctx->Device.Send.Capacity)
-        goto cleanupSendUnlockPages;
+        goto cleanupSendUnmapPages;
 
     Ctx->Device.Receive.Capacity = TUN_RING_CAPACITY(Rrb->Receive.RingSize);
     if (Status = STATUS_INVALID_PARAMETER,
         (Ctx->Device.Receive.Capacity < TUN_MIN_RING_CAPACITY || Ctx->Device.Receive.Capacity > TUN_MAX_RING_CAPACITY ||
          !IS_POW2(Ctx->Device.Receive.Capacity) || !Rrb->Receive.TailMoved || !Rrb->Receive.Ring))
-        goto cleanupSendUnlockPages;
+        goto cleanupSendUnmapPages;
 
     if (!NT_SUCCESS(
             Status = ObReferenceObjectByHandle(
@@ -613,7 +613,7 @@ TunRegisterBuffers(_Inout_ TUN_CTX *Ctx, _Inout_ IRP *Irp)
                 UserMode,
                 &Ctx->Device.Receive.TailMoved,
                 NULL)))
-        goto cleanupSendUnlockPages;
+        goto cleanupSendUnmapPages;
 
     Ctx->Device.Receive.Mdl = IoAllocateMdl(Rrb->Receive.Ring, Rrb->Receive.RingSize, FALSE, FALSE, NULL);
     if (Status = STATUS_INSUFFICIENT_RESOURCES, !Ctx->Device.Receive.Mdl)
@@ -654,12 +654,15 @@ cleanupFlagsConnected:
     ExReleaseSpinLockExclusive(
         &Ctx->TransitionLock,
         ExAcquireSpinLockExclusive(&Ctx->TransitionLock)); /* Ensure above change is visible to all readers. */
+    MmUnmapLockedPages(Ctx->Device.Receive.Ring, Ctx->Device.Receive.Mdl);
 cleanupReceiveUnlockPages:
     MmUnlockPages(Ctx->Device.Receive.Mdl);
 cleanupReceiveMdl:
     IoFreeMdl(Ctx->Device.Receive.Mdl);
 cleanupReceiveTailMoved:
     ObDereferenceObject(Ctx->Device.Receive.TailMoved);
+cleanupSendUnmapPages:
+    MmUnmapLockedPages(Ctx->Device.Send.Ring, Ctx->Device.Send.Mdl);
 cleanupSendUnlockPages:
     MmUnlockPages(Ctx->Device.Send.Mdl);
 cleanupSendMdl:
@@ -711,9 +714,11 @@ TunUnregisterBuffers(_Inout_ TUN_CTX *Ctx, _In_ FILE_OBJECT *Owner)
     InterlockedSetU(&Ctx->Device.Send.Ring->Tail, MAXULONG);
     KeSetEvent(Ctx->Device.Send.TailMoved, IO_NO_INCREMENT, FALSE);
 
+    MmUnmapLockedPages(Ctx->Device.Receive.Ring, Ctx->Device.Receive.Mdl);
     MmUnlockPages(Ctx->Device.Receive.Mdl);
     IoFreeMdl(Ctx->Device.Receive.Mdl);
     ObDereferenceObject(Ctx->Device.Receive.TailMoved);
+    MmUnmapLockedPages(Ctx->Device.Send.Ring, Ctx->Device.Send.Mdl);
     MmUnlockPages(Ctx->Device.Send.Mdl);
     IoFreeMdl(Ctx->Device.Send.Mdl);
     ObDereferenceObject(Ctx->Device.Send.TailMoved);
